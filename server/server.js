@@ -2,7 +2,7 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
-const connectDB = require('./config/db');
+// const connectDB = require('./config/db');
 const roomManager = require('./utils/roomManager');
 
 const app = express();
@@ -15,7 +15,7 @@ const io = new Server(server, {
     }
 });
 
-connectDB();
+// connectDB();
 
 // User session management
 const userSessions = new Map();
