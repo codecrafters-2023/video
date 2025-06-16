@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useSocket } from '../context/SocketContext';
 import Peer from 'peerjs';
 
@@ -15,50 +15,78 @@ const VideoChat = () => {
   const userId = useRef(Date.now().toString(36) + Math.random().toString(36).substring(2));
 
   // Initialize media with proper error handling
-  useEffect(() => {
-    const initMedia = async () => {
-      try {
-        // Try to get media with audio only first (more likely to succeed)
-        const stream = await navigator.mediaDevices.getUserMedia({ 
-          audio: true, 
-          video: { facingMode: 'user' } 
-        });
-        
-        localStreamRef.current = stream;
-        if (localVideoRef.current) {
-          localVideoRef.current.srcObject = stream;
+  const initMedia = useCallback(async () => {
+    setStatus('requesting_media');
+    try {
+      // Try to get media with audio only first (more likely to succeed)
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: true, 
+        video: { 
+          facingMode: 'user',
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
         }
-        
-        // If we're not connected, join the queue
-        if (socket && status === 'disconnected') {
-          socket.emit('join', userId.current);
-          setStatus('searching');
-        }
-      } catch (err) {
-        console.error('Media access error:', err);
-        setMediaError(err.name);
-        setStatus('media_error');
-        
-        // Try again without video if video fails
-        try {
-          const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-          localStreamRef.current = audioStream;
-          setStatus('audio_only');
-          
-          if (socket && status === 'disconnected') {
-            socket.emit('join', userId.current);
-            setStatus('searching');
-          }
-        } catch (audioErr) {
-          console.error('Audio-only access error:', audioErr);
-          setMediaError(audioErr.name);
-          setStatus('media_error');
-        }
+      });
+      
+      // Stop any existing stream
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach(track => track.stop());
       }
-    };
+      
+      localStreamRef.current = stream;
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = stream;
+      }
+      
+      setMediaError(null);
+      setStatus('searching');
+      
+      // If socket is available, join the queue
+      if (socket) {
+        socket.emit('join', userId.current);
+      }
+    } catch (err) {
+      console.error('Media access error:', err);
+      setMediaError(err.name);
+      setStatus('media_error');
+      
+      // Try again without video if video fails
+      try {
+        const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        
+        // Stop any existing stream
+        if (localStreamRef.current) {
+          localStreamRef.current.getTracks().forEach(track => track.stop());
+        }
+        
+        localStreamRef.current = audioStream;
+        setStatus('audio_only');
+        setMediaError(null);
+        
+        if (socket) {
+          socket.emit('join', userId.current);
+        }
+      } catch (audioErr) {
+        console.error('Audio-only access error:', audioErr);
+        setMediaError(audioErr.name);
+        setStatus('media_error');
+      }
+    }
+  }, [socket]);
 
+  // Initial media acquisition
+  useEffect(() => {
+    // Check if we're on HTTPS (required for media access)
+    if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') {
+      setStatus('https_required');
+      return;
+    }
+    
     initMedia();
+  }, [initMedia]);
 
+  // Cleanup
+  useEffect(() => {
     return () => {
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach(track => track.stop());
@@ -67,7 +95,7 @@ const VideoChat = () => {
         peerRef.current.destroy();
       }
     };
-  }, [socket, status]);
+  }, []);
 
   // Socket event handling
   useEffect(() => {
@@ -117,16 +145,16 @@ const VideoChat = () => {
       peerRef.current.destroy();
     }
 
-    // Create new peer connection
+    // Create new peer connection with public STUN servers
     const peer = new Peer({
-      host: 'localhost',
-      port: 9000,
-      path: '/peerjs',
       debug: 3,
       config: {
         iceServers: [
           { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:stun1.l.google.com:19302' }
+          { urls: 'stun:stun1.l.google.com:19302' },
+          { urls: 'stun:stun2.l.google.com:19302' },
+          { urls: 'stun:stun3.l.google.com:19302' },
+          { urls: 'stun:stun4.l.google.com:19302' }
         ]
       }
     });
@@ -188,33 +216,10 @@ const VideoChat = () => {
     }
   };
 
-  const handleRetryMedia = async () => {
+  const handleRetryMedia = useCallback(async () => {
     setStatus('retrying');
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        audio: true, 
-        video: true 
-      });
-      
-      localStreamRef.current = stream;
-      if (localVideoRef.current) {
-        localVideoRef.current.srcObject = stream;
-      }
-      
-      setMediaError(null);
-      setStatus('disconnected');
-      
-      // Rejoin queue
-      if (socket) {
-        socket.emit('join', userId.current);
-        setStatus('searching');
-      }
-    } catch (err) {
-      console.error('Retry media error:', err);
-      setMediaError(err.name);
-      setStatus('media_error');
-    }
-  };
+    await initMedia();
+  }, [initMedia]);
 
   const getStatusMessage = () => {
     switch (status) {
@@ -222,10 +227,12 @@ const VideoChat = () => {
       case 'searching': return '🔍 Searching for partner...';
       case 'connected': return '✅ Connected to partner';
       case 'partner_left': return '⚠️ Partner disconnected';
-      case 'media_error': return '❌ Media error: ' + mediaError;
+      case 'media_error': return `❌ Media error: ${mediaError || 'Permission denied'}`;
       case 'audio_only': return '🎤 Audio only mode';
       case 'connection_error': return '⚠️ Connection error';
       case 'retrying': return 'Retrying...';
+      case 'requesting_media': return 'Requesting camera access...';
+      case 'https_required': return '⚠️ Please use HTTPS for camera access';
       default: return status;
     }
   };
@@ -261,7 +268,7 @@ const VideoChat = () => {
           Next Partner
         </button>
         
-        {status === 'media_error' && (
+        {(status === 'media_error' || status === 'https_required') && (
           <button 
             onClick={handleRetryMedia}
             className="retry-btn"
@@ -270,6 +277,24 @@ const VideoChat = () => {
           </button>
         )}
       </div>
+      
+      {(status === 'media_error' || status === 'https_required') && (
+        <div className="permission-help">
+          <h3>Camera Access Required</h3>
+          <p>To use this app, you need to allow camera access:</p>
+          <ul>
+            <li>Click the camera icon in your browser's address bar</li>
+            <li>Select "Always allow" for camera and microphone access</li>
+            <li>Refresh the page after granting permissions</li>
+          </ul>
+          <p>If you don't see the permission prompt, try these steps:</p>
+          <ul>
+            <li>Check your browser settings for camera permissions</li>
+            <li>Ensure no other application is using your camera</li>
+            <li>Try restarting your browser</li>
+          </ul>
+        </div>
+      )}
     </div>
   );
 };
