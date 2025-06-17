@@ -1,0 +1,228 @@
+/* Modern Video Chat Styles */
+:root {
+    --vc-primary: #4361ee;
+    --vc-primary-dark: #3a56d4;
+    --vc-secondary: #7209b7;
+    --vc-success: #4cc9f0;
+    --vc-warning: #f72585;
+    --vc-error: #f94144;
+    --vc-light: #f8f9fa;
+    --vc-dark: #0e1424;
+    --vc-gray: #6c757d;
+    --vc-light-gray: #e9ecef;
+    --vc-border-radius: 12px;
+    --vc-box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+    --vc-transition: all 0.3s ease;
+}
+
+/* Container */
+.vc-container {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    background: linear-gradient(135deg, #0e1424 0%, #1a2a4a 100%);
+    color: white;
+    /* overflow: hidden; */
+    position: relative;
+}
+
+/* Status Bar */
+.vc-status-bar {
+    background-color: rgba(15, 23, 42, 0.8);
+    padding: 12px 20px;
+    text-align: center;
+    font-size: 1.1rem;
+    font-weight: 500;
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    z-index: 10;
+}
+
+/* Video Grid */
+.vc-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    flex-grow: 1;
+    padding: 15px;
+    gap: 15px;
+}
+
+@media (min-width: 768px) {
+    .vc-grid {
+        grid-template-columns: 1fr 1fr;
+    }
+}
+
+.vc-video-wrapper {
+    position: relative;
+    border-radius: var(--vc-border-radius);
+    overflow: hidden;
+    box-shadow: var(--vc-box-shadow);
+    background: rgba(15, 23, 42, 0.5);
+    transition: var(--vc-transition);
+}
+
+.vc-video-container {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.vc-local-video,
+.vc-remote-video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    background: rgba(15, 23, 42, 0.7);
+    transform: scaleX(-1);
+    /* Mirror for local video */
+    border-radius: var(--vc-border-radius);
+}
+
+.vc-remote-video {
+    transform: scaleX(1);
+    /* Normal for remote */
+}
+
+.vc-video-label {
+    position: absolute;
+    bottom: 10px;
+    left: 10px;
+    background: rgba(0, 0, 0, 0.5);
+    padding: 5px 10px;
+    border-radius: 20px;
+    font-size: 0.9rem;
+    z-index: 2;
+}
+
+.vc-video-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(to top, rgba(0, 0, 0, 0.7) 0%, rgba(0, 0, 0, 0) 30%);
+    z-index: 1;
+    border-radius: var(--vc-border-radius);
+}
+
+/* Controls */
+.vc-controls {
+    display: flex;
+    justify-content: center;
+    padding: 20px;
+    gap: 15px;
+    background: rgba(15, 23, 42, 0.8);
+    backdrop-filter: blur(10px);
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.vc-control-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 24px;
+    border-radius: 50px;
+    font-weight: 600;
+    font-size: 1rem;
+    border: none;
+    cursor: pointer;
+    transition: var(--vc-transition);
+    background: rgba(255, 255, 255, 0.1);
+    color: white;
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.vc-control-btn:hover {
+    background: rgba(255, 255, 255, 0.2);
+    transform: translateY(-2px);
+}
+
+.vc-control-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.vc-next-btn:hover {
+    background: var(--vc-primary);
+    box-shadow: 0 4px 20px rgba(67, 97, 238, 0.4);
+}
+
+.vc-retry-btn:hover {
+    background: var(--vc-secondary);
+    box-shadow: 0 4px 20px rgba(114, 9, 183, 0.4);
+}
+
+.vc-btn-icon {
+    font-size: 1.2rem;
+}
+
+/* Help Section */
+.vc-help-section {
+    background: rgba(15, 23, 42, 0.9);
+    padding: 25px;
+    border-radius: var(--vc-border-radius);
+    margin: 20px;
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.vc-help-title {
+    color: var(--vc-success);
+    margin-bottom: 15px;
+    font-size: 1.5rem;
+}
+
+.vc-help-text {
+    margin-bottom: 10px;
+    line-height: 1.6;
+}
+
+.vc-help-list {
+    margin-left: 20px;
+    margin-bottom: 20px;
+}
+
+.vc-help-item {
+    margin-bottom: 8px;
+    line-height: 1.5;
+}
+
+/* Status indicators */
+.vc-status-bar[data-status="connected"] {
+    color: var(--vc-success);
+}
+
+.vc-status-bar[data-status="searching"] {
+    color: #f9c74f;
+}
+
+.vc-status-bar[data-status="partner_left"],
+.vc-status-bar[data-status="connection_error"],
+.vc-status-bar[data-status="connection_timeout"] {
+    color: var(--vc-warning);
+}
+
+.vc-status-bar[data-status="media_error"],
+.vc-status-bar[data-status="https_required"] {
+    color: var(--vc-error);
+}
+
+/* Audio only indicator */
+.vc-audio-only {
+    background: linear-gradient(135deg, #4361ee 0%, #7209b7 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.vc-audio-only::before {
+    content: "🎤";
+    font-size: 3rem;
+    position: absolute;
+}

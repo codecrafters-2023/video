@@ -1,6 +1,7 @@
 /* eslint-disable no-unused-vars */
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useSocket } from '../context/SocketContext';
+import { useSocket } from '../../context/SocketContext';
+import './VideoChat.css';
 
 const VideoChat = () => {
   const socket = useSocket();
@@ -435,61 +436,69 @@ const VideoChat = () => {
   }, [status]);
 
   return (
-    <div className="video-container">
-      <div className="status-bar">{getStatusMessage()}</div>
-
-      <div className="video-grid">
-        <div className="video-wrapper">
-          <video
-            ref={localVideoRef}
-            autoPlay
-            muted
-            playsInline
-            className={status === 'audio_only' ? 'audio-only' : ''}
-          />
-          <div className="video-label">You</div>
+     <div className="vc-container">
+      <div className="vc-status-bar">{getStatusMessage()}</div>
+      
+      <div className="vc-grid">
+        <div className="vc-video-wrapper">
+          <div className="vc-video-container">
+            <video
+              ref={localVideoRef}
+              autoPlay
+              muted
+              playsInline
+              className={`vc-local-video ${status === 'audio_only' ? 'vc-audio-only' : ''}`}
+            />
+            <div className="vc-video-label">You</div>
+            <div className="vc-video-overlay"></div>
+          </div>
         </div>
-
-        <div className="video-wrapper">
-          <video ref={remoteVideoRef} autoPlay playsInline />
-          <div className="video-label">Partner</div>
+        
+        <div className="vc-video-wrapper">
+          <div className="vc-video-container">
+            <video ref={remoteVideoRef} autoPlay playsInline className="vc-remote-video" />
+            <div className="vc-video-label">Partner</div>
+            <div className="vc-video-overlay"></div>
+          </div>
         </div>
       </div>
-
-      <div className="controls">
+      
+      <div className="vc-controls">
         <button
           onClick={handleNextPartner}
           disabled={status !== 'connected' && status !== 'partner_left' && status !== 'connection_error' && status !== 'connection_timeout'}
-          className="next-btn"
+          className="vc-control-btn vc-next-btn"
         >
-          Next Partner
+          <span className="vc-btn-icon">⟳</span>
+          <span className="vc-btn-text">Next Partner</span>
         </button>
-
+        
         {(status === 'media_error' || status === 'https_required') && (
           <button
             onClick={handleRetryMedia}
-            className="retry-btn"
+            className="vc-control-btn vc-retry-btn"
           >
-            Retry Camera
+            <span className="vc-btn-icon">↻</span>
+            <span className="vc-btn-text">Retry Camera</span>
           </button>
         )}
       </div>
-
+      
       {(status === 'media_error' || status === 'https_required') && (
-        <div className="permission-help">
-          <h3>Camera Access Required</h3>
-          <p>To use this app, you need to allow camera access:</p>
-          <ul>
-            <li>Click the camera icon in your browser's address bar</li>
-            <li>Select "Always allow" for camera and microphone access</li>
-            <li>Refresh the page after granting permissions</li>
+        <div className="vc-help-section">
+          <h3 className="vc-help-title">Camera Access Required</h3>
+          <p className="vc-help-text">To use this app, you need to allow camera access:</p>
+          <ul className="vc-help-list">
+            <li className="vc-help-item">Click the camera icon in your browser's address bar</li>
+            <li className="vc-help-item">Select "Always allow" for camera and microphone access</li>
+            <li className="vc-help-item">Refresh the page after granting permissions</li>
           </ul>
-          <p>If you don't see the permission prompt, try these steps:</p>
-          <ul>
-            <li>Check your browser settings for camera permissions</li>
-            <li>Ensure no other application is using your camera</li>
-            <li>Try restarting your browser</li>
-            <li>Use Chrome or Firefox for best compatibility</li>
+          <p className="vc-help-text">If you don't see the permission prompt, try these steps:</p>
+          <ul className="vc-help-list">
+            <li className="vc-help-item">Check your browser settings for camera permissions</li>
+            <li className="vc-help-item">Ensure no other application is using your camera</li>
+            <li className="vc-help-item">Try restarting your browser</li>
+            <li className="vc-help-item">Use Chrome or Firefox for best compatibility</li>
           </ul>
         </div>
       )}
