@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useSocket } from '../context/SocketContext';
 import SimplePeer from 'simple-peer';
