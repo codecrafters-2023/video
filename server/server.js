@@ -8,16 +8,19 @@ app.use(cors());
 const server = http.createServer(app);
 
 // Configure CORS properly
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+    ? ['https://videochats-app.vercel.app', 'http://localhost:3000'].split(',')
+    : ['https://videochats-app.vercel.app', 'http://localhost:3000'];
+
 const io = new Server(server, {
     cors: {
-        origin: 'https://videochats-app.vercel.app',
+        origin: allowedOrigins,
         methods: ['GET', 'POST'],
         credentials: true
     }
 });
 
 // User and room management
-const userSessions = new Map();
 const waitingQueue = [];
 const activeRooms = new Map();
 
@@ -25,7 +28,7 @@ io.on('connection', (socket) => {
     console.log(`New connection: ${socket.id}`);
 
     socket.on('join', (userId) => {
-        userSessions.set(socket.id, userId);
+        console.log(`User ${userId} (${socket.id}) joined queue`);
         waitingQueue.push(socket.id);
         socket.emit('status', 'Searching for a partner...');
         tryToPairUsers();
@@ -33,7 +36,7 @@ io.on('connection', (socket) => {
 
     // Handle WebRTC signaling
     socket.on('signal', (data) => {
-        // Forward signal with type information
+        console.log(`Signal from ${socket.id} to ${data.to}`);
         io.to(data.to).emit('signal', {
             from: socket.id,
             type: data.type,
@@ -45,46 +48,14 @@ io.on('connection', (socket) => {
 
     // Handle disconnections
     socket.on('disconnect', () => {
-        const roomId = [...activeRooms.entries()]
-            .find(([roomId, users]) => users.includes(socket.id))?.[0];
-
-        if (roomId) {
-            const usersInRoom = activeRooms.get(roomId);
-            const partnerId = usersInRoom.find(id => id !== socket.id);
-
-            if (partnerId) {
-                io.to(partnerId).emit('partner_disconnected');
-            }
-
-            activeRooms.delete(roomId);
-        }
-
-        // Remove from waiting queue
-        const index = waitingQueue.indexOf(socket.id);
-        if (index !== -1) {
-            waitingQueue.splice(index, 1);
-        }
-
-        userSessions.delete(socket.id);
         console.log(`Disconnected: ${socket.id}`);
+        cleanupUser(socket.id);
     });
 
     // Handle "next partner" requests
     socket.on('next', () => {
-        const roomId = [...activeRooms.entries()]
-            .find(([roomId, users]) => users.includes(socket.id))?.[0];
-
-        if (roomId) {
-            socket.leave(roomId);
-            const usersInRoom = activeRooms.get(roomId);
-            const partnerId = usersInRoom.find(id => id !== socket.id);
-
-            if (partnerId) {
-                io.to(partnerId).emit('partner_disconnected');
-            }
-
-            activeRooms.delete(roomId);
-        }
+        console.log(`Next requested by: ${socket.id}`);
+        cleanupUser(socket.id);
 
         // Rejoin queue
         waitingQueue.push(socket.id);
@@ -93,20 +64,50 @@ io.on('connection', (socket) => {
     });
 });
 
+// Cleanup user resources
+function cleanupUser(socketId) {
+    // Remove from waiting queue
+    const queueIndex = waitingQueue.indexOf(socketId);
+    if (queueIndex !== -1) {
+        waitingQueue.splice(queueIndex, 1);
+    }
+
+    // Cleanup rooms
+    for (const [roomId, users] of activeRooms.entries()) {
+        const userIndex = users.indexOf(socketId);
+        if (userIndex !== -1) {
+            const partnerId = users.find(id => id !== socketId);
+
+            if (partnerId) {
+                io.to(partnerId).emit('partner_disconnected');
+            }
+
+            activeRooms.delete(roomId);
+            break;
+        }
+    }
+}
+
 // Pair users from the waiting queue
 function tryToPairUsers() {
-    if (waitingQueue.length >= 2) {
+    console.log(`Trying to pair users. Queue size: ${waitingQueue.length}`);
+
+    while (waitingQueue.length >= 2) {
         const user1 = waitingQueue.shift();
         const user2 = waitingQueue.shift();
         const roomId = `room_${Date.now()}`;
 
         activeRooms.set(roomId, [user1, user2]);
 
+        console.log(`Paired ${user1} and ${user2} in room ${roomId}`);
+
+        // User1 is always the initiator
         io.to(user1).emit('paired', {
             roomId,
             partnerId: user2,
             isInitiator: true
         });
+
         io.to(user2).emit('paired', {
             roomId,
             partnerId: user1,

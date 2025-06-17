@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/exhaustive-deps */
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useSocket } from '../context/SocketContext';
 
@@ -9,10 +10,11 @@ const VideoChat = () => {
   const [partnerId, setPartnerId] = useState(null);
   const [roomId, setRoomId] = useState(null);
   const [mediaError, setMediaError] = useState(null);
-  const peerRef = useRef(null); // Will hold RTCPeerConnection instance
+  const peerRef = useRef(null);
   const localStreamRef = useRef(null);
   const userId = useRef(Date.now().toString(36) + Math.random().toString(36).substring(2));
   const isInitiatorRef = useRef(false);
+  const connectionTimeoutRef = useRef(null);
 
   // Initialize media with proper error handling
   const initMedia = useCallback(async () => {
@@ -27,6 +29,7 @@ const VideoChat = () => {
         }
       });
 
+      // Stop any existing stream
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach(track => track.stop());
       }
@@ -39,6 +42,7 @@ const VideoChat = () => {
       setMediaError(null);
       setStatus('searching');
 
+      // If socket is available, join the queue
       if (socket) {
         socket.emit('join', userId.current);
       }
@@ -47,6 +51,7 @@ const VideoChat = () => {
       setMediaError(err.name);
       setStatus('media_error');
 
+      // Try again without video if video fails
       try {
         const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
         
@@ -88,6 +93,10 @@ const VideoChat = () => {
       if (peerRef.current) {
         peerRef.current.close();
       }
+      if (connectionTimeoutRef.current) {
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        clearTimeout(connectionTimeoutRef.current);
+      }
     };
   }, []);
 
@@ -119,6 +128,7 @@ const VideoChat = () => {
     
     // Handle remote stream
     peer.ontrack = (event) => {
+      console.log('Received remote stream');
       if (remoteVideoRef.current) {
         remoteVideoRef.current.srcObject = event.streams[0];
       }
@@ -127,6 +137,7 @@ const VideoChat = () => {
     // Handle ICE candidates
     peer.onicecandidate = (event) => {
       if (event.candidate && socket && targetId) {
+        console.log('Sending ICE candidate');
         socket.emit('signal', { 
           to: targetId, 
           type: 'candidate', 
@@ -136,24 +147,27 @@ const VideoChat = () => {
     };
     
     peer.oniceconnectionstatechange = () => {
-      if (peer.iceConnectionState === 'failed' || 
-          peer.iceConnectionState === 'disconnected' ||
-          peer.iceConnectionState === 'closed') {
-        setStatus('connection_error');
-      }
-    };
-    
-    peer.onconnectionstatechange = () => {
-      if (peer.connectionState === 'connected') {
+      console.log(`ICE state: ${peer.iceConnectionState}`);
+      if (peer.iceConnectionState === 'connected') {
         setStatus('connected');
+      }
+      else if (peer.iceConnectionState === 'failed' || 
+               peer.iceConnectionState === 'disconnected' ||
+               peer.iceConnectionState === 'closed') {
+        setStatus('connection_error');
       }
     };
     
     // For initiator: create offer
     if (isInitiator) {
+      console.log('Creating offer as initiator');
       peer.createOffer()
-        .then(offer => peer.setLocalDescription(offer))
+        .then(offer => {
+          console.log('Offer created');
+          return peer.setLocalDescription(offer);
+        })
         .then(() => {
+          console.log('Sending offer');
           socket.emit('signal', { 
             to: targetId, 
             type: 'offer', 
@@ -174,6 +188,7 @@ const VideoChat = () => {
     if (!socket) return;
 
     const handlePaired = ({ roomId, partnerId, isInitiator }) => {
+      console.log(`Paired with partner: ${partnerId}, Initiator: ${isInitiator}`);
       setRoomId(roomId);
       setPartnerId(partnerId);
       setStatus('connected');
@@ -181,6 +196,7 @@ const VideoChat = () => {
     };
 
     const handlePartnerDisconnected = () => {
+      console.log('Partner disconnected');
       setStatus('partner_left');
       setPartnerId(null);
       if (remoteVideoRef.current) {
@@ -193,10 +209,12 @@ const VideoChat = () => {
     };
 
     const handleSignal = (data) => {
-      if (!peerRef.current) return;
+      console.log(`Received signal of type: ${data.type}`);
+      if (!peerRef.current || !data.type) return;
       
       switch (data.type) {
         case 'offer':
+          console.log('Processing offer');
           peerRef.current.setRemoteDescription(new RTCSessionDescription(data.offer))
             .then(() => {
               return peerRef.current.createAnswer();
@@ -205,6 +223,7 @@ const VideoChat = () => {
               return peerRef.current.setLocalDescription(answer);
             })
             .then(() => {
+              console.log('Sending answer');
               socket.emit('signal', { 
                 to: data.from, 
                 type: 'answer', 
@@ -218,6 +237,7 @@ const VideoChat = () => {
           break;
           
         case 'answer':
+          console.log('Processing answer');
           peerRef.current.setRemoteDescription(new RTCSessionDescription(data.answer))
             .catch(err => {
               console.error('Error setting answer:', err);
@@ -226,6 +246,7 @@ const VideoChat = () => {
           break;
           
         case 'candidate':
+          console.log('Processing ICE candidate');
           peerRef.current.addIceCandidate(new RTCIceCandidate(data.candidate))
             .catch(err => {
               console.error('Error adding ICE candidate:', err);
@@ -241,12 +262,30 @@ const VideoChat = () => {
     socket.on('partner_disconnected', handlePartnerDisconnected);
     socket.on('signal', handleSignal);
 
+    // Connection status
+    socket.on('connect', () => {
+      console.log('Socket connected');
+      setStatus('searching');
+    });
+    
+    socket.on('disconnect', () => {
+      console.log('Socket disconnected');
+      setStatus('disconnected');
+    });
+    
+    socket.on('connect_error', (err) => {
+      console.error('Socket connection error:', err);
+      setStatus('connection_error');
+    });
+
     return () => {
       socket.off('paired', handlePaired);
       socket.off('partner_disconnected', handlePartnerDisconnected);
       socket.off('signal', handleSignal);
+      socket.off('connect');
+      socket.off('disconnect');
+      socket.off('connect_error');
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [socket]);
 
   const handleNextPartner = () => {
@@ -292,6 +331,7 @@ const VideoChat = () => {
   useEffect(() => {
     if (status === 'connection_error' && socket && partnerId) {
       const timer = setTimeout(() => {
+        console.log('Attempting to reconnect');
         initPeerConnection(partnerId, isInitiatorRef.current);
       }, 2000);
       

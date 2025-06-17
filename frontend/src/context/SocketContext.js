@@ -8,10 +8,11 @@ export function useSocket() {
 }
 
 export const SocketProvider = ({ children }) => {
-  // Use relative path in production, absolute in development
-  const socketUrl = process.env.NODE_ENV === 'production' 
-    ? window.location.origin 
-    : 'https://video-lb8z.onrender.com';
+  // Use environment variable or fallback to production URL
+  const socketUrl = process.env.REACT_APP_SOCKET_URL || 
+    (process.env.NODE_ENV === 'production' 
+      ? 'https://video-lb8z.onrender.com' 
+      : 'https://video-lb8z.onrender.com');
   
   const socket = io(socketUrl, {
     transports: ['websocket'],
