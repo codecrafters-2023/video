@@ -21,14 +21,35 @@ const io = new Server(server, {
 });
 
 // User and room management
-let waitingQueue = []; // Changed to let
+let waitingQueue = [];
 const activeRooms = new Map();
+const userRoomMap = new Map();  // socketId -> roomId (reverse mapping)
 
 // Cleanup disconnected users periodically
 setInterval(() => {
     const initialCount = waitingQueue.length;
+    
+    // Remove disconnected users from queue
     waitingQueue = waitingQueue.filter(id => io.sockets.sockets.has(id));
-    console.log(`Cleaned ${initialCount - waitingQueue.length} disconnected users from queue. Current size: ${waitingQueue.length}`);
+    
+    // Check active rooms for disconnected users
+    activeRooms.forEach((users, roomId) => {
+        const disconnectedUsers = users.filter(id => !io.sockets.sockets.has(id));
+        
+        if (disconnectedUsers.length > 0) {
+            // Notify connected partner if only one disconnected
+            const connectedUsers = users.filter(id => io.sockets.sockets.has(id));
+            if (connectedUsers.length === 1) {
+                io.to(connectedUsers[0]).emit('partner_disconnected');
+            }
+            
+            // Delete room and mappings
+            activeRooms.delete(roomId);
+            users.forEach(id => userRoomMap.delete(id));
+        }
+    });
+    
+    console.log(`Cleaned ${initialCount - waitingQueue.length} disconnected users. Active rooms: ${activeRooms.size}`);
 }, 30000); // Every 30 seconds
 
 io.on('connection', (socket) => {
@@ -36,26 +57,31 @@ io.on('connection', (socket) => {
 
     socket.on('join', (userId) => {
         console.log(`User ${userId} (${socket.id}) joined queue`);
-
-        // Add to queue if not already present
+        
+        // Only add to queue if not already waiting or in a room
         if (!waitingQueue.includes(socket.id)) {
             waitingQueue.push(socket.id);
+            tryToPairUsers();
         }
-
-        socket.emit('status', 'Searching for a partner...');
-        tryToPairUsers();
     });
 
-    // Handle WebRTC signaling
+    // Handle WebRTC signaling with security validation
     socket.on('signal', (data) => {
-        console.log(`Signal from ${socket.id} to ${data.to}`);
-        io.to(data.to).emit('signal', {
-            from: socket.id,
-            type: data.type,
-            offer: data.offer,
-            answer: data.answer,
-            candidate: data.candidate
-        });
+        const senderRoom = userRoomMap.get(socket.id);
+        const targetRoom = userRoomMap.get(data.to);
+        
+        // Validate both users are in the same room
+        if (senderRoom && senderRoom === targetRoom) {
+            io.to(data.to).emit('signal', {
+                from: socket.id,
+                type: data.type,
+                offer: data.offer,
+                answer: data.answer,
+                candidate: data.candidate
+            });
+        } else {
+            console.warn(`Invalid signal attempt from ${socket.id} to ${data.to}`);
+        }
     });
 
     // Handle disconnections
@@ -67,60 +93,62 @@ io.on('connection', (socket) => {
     // Handle "next partner" requests
     socket.on('next', () => {
         console.log(`Next requested by: ${socket.id}`);
-        cleanupUser(socket.id);
-
+        cleanupUser(socket.id, true); // Keep in queue
+        
         // Rejoin queue
         if (!waitingQueue.includes(socket.id)) {
             waitingQueue.push(socket.id);
+            tryToPairUsers();
         }
-        socket.emit('status', 'Searching for new partner...');
-        tryToPairUsers();
     });
 });
 
 // Cleanup user resources
-function cleanupUser(socketId) {
-    // Remove from waiting queue
-    const queueIndex = waitingQueue.indexOf(socketId);
-    if (queueIndex !== -1) {
-        waitingQueue.splice(queueIndex, 1);
+function cleanupUser(socketId, keepInQueue = false) {
+    // Remove from waiting queue unless requested to keep
+    if (!keepInQueue) {
+        const queueIndex = waitingQueue.indexOf(socketId);
+        if (queueIndex !== -1) {
+            waitingQueue.splice(queueIndex, 1);
+        }
     }
 
     // Cleanup rooms
-    for (const [roomId, users] of activeRooms.entries()) {
-        const userIndex = users.indexOf(socketId);
-        if (userIndex !== -1) {
-            const partnerId = users.find(id => id !== socketId);
+    const roomId = userRoomMap.get(socketId);
+    if (roomId) {
+        const users = activeRooms.get(roomId) || [];
+        const partnerId = users.find(id => id !== socketId);
 
-            if (partnerId) {
-                io.to(partnerId).emit('partner_disconnected');
-            }
-
-            activeRooms.delete(roomId);
-            break;
+        if (partnerId) {
+            io.to(partnerId).emit('partner_disconnected');
+            userRoomMap.delete(partnerId);
         }
+
+        activeRooms.delete(roomId);
+        userRoomMap.delete(socketId);
     }
 }
 
-// Pair users from the waiting queue
+// Pair users from the waiting queue atomically
 function tryToPairUsers() {
-    console.log(`Trying to pair users. Queue size: ${waitingQueue.length}`);
-
     // Filter out disconnected users
     const activeUsers = waitingQueue.filter(id => io.sockets.sockets.has(id));
-
-    if (activeUsers.length >= 2) {
+    
+    while (activeUsers.length >= 2) {
         const user1 = activeUsers.shift();
         const user2 = activeUsers.shift();
-        const roomId = `room_${Date.now()}`;
-
-        // Update the actual waiting queue
-        waitingQueue = activeUsers;
-
+        const roomId = `room_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`;
+        
+        // Update actual waiting queue by removing paired users
+        waitingQueue = waitingQueue.filter(id => id !== user1 && id !== user2);
+        
+        // Create room mappings
         activeRooms.set(roomId, [user1, user2]);
+        userRoomMap.set(user1, roomId);
+        userRoomMap.set(user2, roomId);
 
         console.log(`Paired ${user1} and ${user2} in room ${roomId}`);
-
+        
         // User1 is always the initiator
         io.to(user1).emit('paired', {
             roomId,

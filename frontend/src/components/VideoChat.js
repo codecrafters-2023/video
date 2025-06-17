@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useSocket } from '../context/SocketContext';
 
@@ -55,15 +56,15 @@ const VideoChat = () => {
       // Try again without video if video fails
       try {
         const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        
+
         if (localStreamRef.current) {
           localStreamRef.current.getTracks().forEach(track => track.stop());
         }
-        
+
         localStreamRef.current = audioStream;
         setStatus('audio_only');
         setMediaError(null);
-        
+
         if (socket) {
           socket.emit('join', userId.current);
         }
@@ -81,9 +82,9 @@ const VideoChat = () => {
       setStatus('https_required');
       return;
     }
-    
+
     initMedia();
-    
+
     return () => {
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach(track => track.stop());
@@ -91,11 +92,12 @@ const VideoChat = () => {
     };
   }, [initMedia]);
 
-  // Cleanup
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
       if (peerRef.current) {
         peerRef.current.close();
+        peerRef.current = null;
       }
       if (connectionTimeoutRef.current) {
         clearTimeout(connectionTimeoutRef.current);
@@ -108,13 +110,15 @@ const VideoChat = () => {
     // Reset retry count for new connection
     retryCountRef.current = 0;
     lastPartnerIdRef.current = targetId;
-    
+
+    // Close previous connection if exists
     if (peerRef.current) {
       peerRef.current.close();
+      peerRef.current = null;
     }
-    
+
     isInitiatorRef.current = isInitiator;
-    
+
     // Create RTCPeerConnection
     const peer = new RTCPeerConnection({
       iceServers: [
@@ -125,14 +129,14 @@ const VideoChat = () => {
         { urls: 'stun:stun4.l.google.com:19302' }
       ]
     });
-    
+
     // Add local stream
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach(track => {
         peer.addTrack(track, localStreamRef.current);
       });
     }
-    
+
     // Handle remote stream
     peer.ontrack = (event) => {
       console.log('Received remote stream');
@@ -140,41 +144,45 @@ const VideoChat = () => {
         remoteVideoRef.current.srcObject = event.streams[0];
       }
     };
-    
+
     // Handle ICE candidates
     peer.onicecandidate = (event) => {
       if (event.candidate && socket && targetId) {
         console.log('Sending ICE candidate');
-        socket.emit('signal', { 
-          to: targetId, 
-          type: 'candidate', 
-          candidate: event.candidate 
+        socket.emit('signal', {
+          to: targetId,
+          type: 'candidate',
+          candidate: event.candidate
         });
       }
     };
-    
+
     peer.oniceconnectionstatechange = () => {
       console.log(`ICE state: ${peer.iceConnectionState}`);
       if (peer.iceConnectionState === 'connected') {
         setStatus('connected');
       }
-      else if (peer.iceConnectionState === 'failed' || 
-               peer.iceConnectionState === 'disconnected') {
+      else if (peer.iceConnectionState === 'failed' ||
+        peer.iceConnectionState === 'disconnected') {
         setStatus('connection_error');
       }
     };
-    
+
     peer.onconnectionstatechange = () => {
       console.log(`Connection state: ${peer.connectionState}`);
       if (peer.connectionState === 'connected') {
         setStatus('connected');
+        if (connectionTimeoutRef.current) {
+          clearTimeout(connectionTimeoutRef.current);
+          connectionTimeoutRef.current = null;
+        }
       }
-      else if (peer.connectionState === 'disconnected' || 
-               peer.connectionState === 'failed') {
+      else if (peer.connectionState === 'disconnected' ||
+        peer.connectionState === 'failed') {
         setStatus('connection_error');
       }
     };
-    
+
     // For initiator: create offer
     if (isInitiator) {
       console.log('Creating offer as initiator');
@@ -188,12 +196,12 @@ const VideoChat = () => {
         })
         .then(() => {
           console.log('Sending offer');
-          socket.emit('signal', { 
-            to: targetId, 
-            type: 'offer', 
-            offer: peer.localDescription 
+          socket.emit('signal', {
+            to: targetId,
+            type: 'offer',
+            offer: peer.localDescription
           });
-          
+
           // Set timeout for connection establishment
           connectionTimeoutRef.current = setTimeout(() => {
             if (peer.connectionState !== 'connected') {
@@ -208,7 +216,7 @@ const VideoChat = () => {
           setStatus('connection_error');
         });
     }
-    
+
     peerRef.current = peer;
   };
 
@@ -237,13 +245,14 @@ const VideoChat = () => {
       }
       if (connectionTimeoutRef.current) {
         clearTimeout(connectionTimeoutRef.current);
+        connectionTimeoutRef.current = null;
       }
     };
 
     const handleSignal = (data) => {
-      console.log(`Received signal of type: ${data.type}`);
+      console.log(`Received signal of type: ${data.type} from ${data.from}`);
       if (!peerRef.current || !data.type) return;
-      
+
       switch (data.type) {
         case 'offer':
           console.log('Processing offer');
@@ -259,12 +268,12 @@ const VideoChat = () => {
             })
             .then(() => {
               console.log('Sending answer');
-              socket.emit('signal', { 
-                to: data.from, 
-                type: 'answer', 
-                answer: peerRef.current.localDescription 
+              socket.emit('signal', {
+                to: data.from,
+                type: 'answer',
+                answer: peerRef.current.localDescription
               });
-              
+
               // Set timeout for connection establishment
               connectionTimeoutRef.current = setTimeout(() => {
                 if (peerRef.current.connectionState !== 'connected') {
@@ -279,7 +288,7 @@ const VideoChat = () => {
               setStatus('connection_error');
             });
           break;
-          
+
         case 'answer':
           console.log('Processing answer');
           peerRef.current.setRemoteDescription(new RTCSessionDescription(data.answer))
@@ -288,7 +297,7 @@ const VideoChat = () => {
               setStatus('connection_error');
             });
           break;
-          
+
         case 'candidate':
           console.log('Processing ICE candidate');
           peerRef.current.addIceCandidate(new RTCIceCandidate(data.candidate))
@@ -296,7 +305,7 @@ const VideoChat = () => {
               console.error('Error adding ICE candidate:', err);
             });
           break;
-          
+
         default:
           console.warn('Unknown signal type:', data.type);
       }
@@ -311,14 +320,18 @@ const VideoChat = () => {
       console.log('Socket connected');
       if (status === 'disconnected') {
         setStatus('searching');
+        if (localStreamRef.current) {
+          socket.emit('join', userId.current);  // Rejoin queue
+        }
       }
     });
-    
+
     socket.on('disconnect', () => {
       console.log('Socket disconnected');
       setStatus('disconnected');
+      fullCleanup();
     });
-    
+
     socket.on('connect_error', (err) => {
       console.error('Socket connection error:', err);
       setStatus('connection_error');
@@ -332,32 +345,36 @@ const VideoChat = () => {
       socket.off('disconnect');
       socket.off('connect_error');
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [socket, status]);
 
-  // Cleanup when leaving the component or changing partners
-  const fullCleanup = () => {
+  // Cleanup function for partner change
+  const fullCleanup = useCallback(() => {
+    console.log('Performing full cleanup');
+
     if (peerRef.current) {
       peerRef.current.close();
       peerRef.current = null;
     }
-    
+
     if (remoteVideoRef.current) {
       remoteVideoRef.current.srcObject = null;
     }
-    
+
     if (connectionTimeoutRef.current) {
       clearTimeout(connectionTimeoutRef.current);
       connectionTimeoutRef.current = null;
     }
-    
+
     setPartnerId(null);
     setRoomId(null);
-  };
+    setStatus('searching');
+  }, []);
 
   const handleNextPartner = () => {
     if (socket) {
+      console.log('Requesting next partner');
       socket.emit('next');
-      setStatus('searching');
       fullCleanup();
     }
   };
@@ -365,7 +382,12 @@ const VideoChat = () => {
   const handleRetryMedia = useCallback(async () => {
     setStatus('retrying');
     fullCleanup();
-    await initMedia();
+    try {
+      await initMedia();
+    } catch (err) {
+      setStatus('media_error');
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initMedia]);
 
   const getStatusMessage = () => {
@@ -391,13 +413,13 @@ const VideoChat = () => {
       if (retryCountRef.current < 3 && lastPartnerIdRef.current) {
         const delay = Math.pow(2, retryCountRef.current) * 1000;
         console.log(`Reconnecting in ${delay}ms (attempt ${retryCountRef.current + 1})`);
-        
+
         const timer = setTimeout(() => {
           console.log('Attempting to reconnect');
           initPeerConnection(lastPartnerIdRef.current, isInitiatorRef.current);
           retryCountRef.current++;
         }, delay);
-        
+
         return () => clearTimeout(timer);
       } else if (retryCountRef.current >= 3) {
         // After 3 retries, reset and search for new partner
@@ -409,41 +431,42 @@ const VideoChat = () => {
       // Reset retry count on successful connection
       retryCountRef.current = 0;
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status]);
 
   return (
     <div className="video-container">
       <div className="status-bar">{getStatusMessage()}</div>
-      
+
       <div className="video-grid">
         <div className="video-wrapper">
-          <video 
-            ref={localVideoRef} 
-            autoPlay 
-            muted 
-            playsInline 
+          <video
+            ref={localVideoRef}
+            autoPlay
+            muted
+            playsInline
             className={status === 'audio_only' ? 'audio-only' : ''}
           />
           <div className="video-label">You</div>
         </div>
-        
+
         <div className="video-wrapper">
           <video ref={remoteVideoRef} autoPlay playsInline />
           <div className="video-label">Partner</div>
         </div>
       </div>
-      
+
       <div className="controls">
-        <button 
-          onClick={handleNextPartner} 
+        <button
+          onClick={handleNextPartner}
           disabled={status !== 'connected' && status !== 'partner_left' && status !== 'connection_error' && status !== 'connection_timeout'}
           className="next-btn"
         >
           Next Partner
         </button>
-        
+
         {(status === 'media_error' || status === 'https_required') && (
-          <button 
+          <button
             onClick={handleRetryMedia}
             className="retry-btn"
           >
@@ -451,7 +474,7 @@ const VideoChat = () => {
           </button>
         )}
       </div>
-      
+
       {(status === 'media_error' || status === 'https_required') && (
         <div className="permission-help">
           <h3>Camera Access Required</h3>
