@@ -1,7 +1,5 @@
-/* eslint-disable no-unused-vars */
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useSocket } from '../context/SocketContext';
-import SimplePeer from 'simple-peer';
 
 const VideoChat = () => {
   const socket = useSocket();
@@ -11,16 +9,15 @@ const VideoChat = () => {
   const [partnerId, setPartnerId] = useState(null);
   const [roomId, setRoomId] = useState(null);
   const [mediaError, setMediaError] = useState(null);
-  const peerRef = useRef(null);
+  const peerRef = useRef(null); // Will hold RTCPeerConnection instance
   const localStreamRef = useRef(null);
   const userId = useRef(Date.now().toString(36) + Math.random().toString(36).substring(2));
-  const signalQueue = useRef([]);
+  const isInitiatorRef = useRef(false);
 
   // Initialize media with proper error handling
   const initMedia = useCallback(async () => {
     setStatus('requesting_media');
     try {
-      // Try to get media with audio only first (more likely to succeed)
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: true,
         video: {
@@ -30,7 +27,6 @@ const VideoChat = () => {
         }
       });
 
-      // Stop any existing stream
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach(track => track.stop());
       }
@@ -43,7 +39,6 @@ const VideoChat = () => {
       setMediaError(null);
       setStatus('searching');
 
-      // If socket is available, join the queue
       if (socket) {
         socket.emit('join', userId.current);
       }
@@ -52,19 +47,17 @@ const VideoChat = () => {
       setMediaError(err.name);
       setStatus('media_error');
 
-      // Try again without video if video fails
       try {
         const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-        // Stop any existing stream
+        
         if (localStreamRef.current) {
           localStreamRef.current.getTracks().forEach(track => track.stop());
         }
-
+        
         localStreamRef.current = audioStream;
         setStatus('audio_only');
         setMediaError(null);
-
+        
         if (socket) {
           socket.emit('join', userId.current);
         }
@@ -78,12 +71,11 @@ const VideoChat = () => {
 
   // Initial media acquisition
   useEffect(() => {
-    // Check if we're on HTTPS (required for media access)
     if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') {
       setStatus('https_required');
       return;
     }
-
+    
     initMedia();
   }, [initMedia]);
 
@@ -94,10 +86,88 @@ const VideoChat = () => {
         localStreamRef.current.getTracks().forEach(track => track.stop());
       }
       if (peerRef.current) {
-        peerRef.current.destroy();
+        peerRef.current.close();
       }
     };
   }, []);
+
+  // Initialize peer connection with native WebRTC
+  const initPeerConnection = (targetId, isInitiator) => {
+    if (peerRef.current) {
+      peerRef.current.close();
+    }
+    
+    isInitiatorRef.current = isInitiator;
+    
+    // Create RTCPeerConnection
+    const peer = new RTCPeerConnection({
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' },
+        { urls: 'stun:stun3.l.google.com:19302' },
+        { urls: 'stun:stun4.l.google.com:19302' }
+      ]
+    });
+    
+    // Add local stream
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach(track => {
+        peer.addTrack(track, localStreamRef.current);
+      });
+    }
+    
+    // Handle remote stream
+    peer.ontrack = (event) => {
+      if (remoteVideoRef.current) {
+        remoteVideoRef.current.srcObject = event.streams[0];
+      }
+    };
+    
+    // Handle ICE candidates
+    peer.onicecandidate = (event) => {
+      if (event.candidate && socket && targetId) {
+        socket.emit('signal', { 
+          to: targetId, 
+          type: 'candidate', 
+          candidate: event.candidate 
+        });
+      }
+    };
+    
+    peer.oniceconnectionstatechange = () => {
+      if (peer.iceConnectionState === 'failed' || 
+          peer.iceConnectionState === 'disconnected' ||
+          peer.iceConnectionState === 'closed') {
+        setStatus('connection_error');
+      }
+    };
+    
+    peer.onconnectionstatechange = () => {
+      if (peer.connectionState === 'connected') {
+        setStatus('connected');
+      }
+    };
+    
+    // For initiator: create offer
+    if (isInitiator) {
+      peer.createOffer()
+        .then(offer => peer.setLocalDescription(offer))
+        .then(() => {
+          socket.emit('signal', { 
+            to: targetId, 
+            type: 'offer', 
+            offer: peer.localDescription 
+          });
+        })
+        .catch(err => {
+          console.error('Error creating offer:', err);
+          setStatus('connection_error');
+        });
+    }
+    
+    peerRef.current = peer;
+  };
 
   // Socket event handling
   useEffect(() => {
@@ -107,7 +177,7 @@ const VideoChat = () => {
       setRoomId(roomId);
       setPartnerId(partnerId);
       setStatus('connected');
-      initPeerConnection(partnerId, isInitiator); // Pass initiator status
+      initPeerConnection(partnerId, isInitiator);
     };
 
     const handlePartnerDisconnected = () => {
@@ -116,21 +186,54 @@ const VideoChat = () => {
       if (remoteVideoRef.current) {
         remoteVideoRef.current.srcObject = null;
       }
-
-      // Cleanup peer connection
       if (peerRef.current) {
-        peerRef.current.destroy();
+        peerRef.current.close();
         peerRef.current = null;
       }
     };
 
     const handleSignal = (data) => {
-      // If peer connection is ready, signal immediately
-      if (peerRef.current && !peerRef.current.destroyed) {
-        peerRef.current.signal(data.signal);
-      } else {
-        // Queue the signal if peer not ready
-        signalQueue.current.push(data.signal);
+      if (!peerRef.current) return;
+      
+      switch (data.type) {
+        case 'offer':
+          peerRef.current.setRemoteDescription(new RTCSessionDescription(data.offer))
+            .then(() => {
+              return peerRef.current.createAnswer();
+            })
+            .then(answer => {
+              return peerRef.current.setLocalDescription(answer);
+            })
+            .then(() => {
+              socket.emit('signal', { 
+                to: data.from, 
+                type: 'answer', 
+                answer: peerRef.current.localDescription 
+              });
+            })
+            .catch(err => {
+              console.error('Error handling offer:', err);
+              setStatus('connection_error');
+            });
+          break;
+          
+        case 'answer':
+          peerRef.current.setRemoteDescription(new RTCSessionDescription(data.answer))
+            .catch(err => {
+              console.error('Error setting answer:', err);
+              setStatus('connection_error');
+            });
+          break;
+          
+        case 'candidate':
+          peerRef.current.addIceCandidate(new RTCIceCandidate(data.candidate))
+            .catch(err => {
+              console.error('Error adding ICE candidate:', err);
+            });
+          break;
+          
+        default:
+          console.warn('Unknown signal type:', data.type);
       }
     };
 
@@ -143,81 +246,8 @@ const VideoChat = () => {
       socket.off('partner_disconnected', handlePartnerDisconnected);
       socket.off('signal', handleSignal);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [socket]);
-
-  // Initialize peer connection
-  const initPeerConnection = (targetId, isInitiator) => {
-    if (peerRef.current) {
-      peerRef.current.destroy();
-    }
-
-    // Create new peer connection
-    const peer = new SimplePeer({
-      initiator: isInitiator,
-      trickle: true,
-      stream: localStreamRef.current,
-      config: {
-        iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:stun1.l.google.com:19302' },
-          { urls: 'stun:stun2.l.google.com:19302' },
-          { urls: 'stun:stun3.l.google.com:19302' },
-          { urls: 'stun:stun4.l.google.com:19302' }
-        ],
-        iceCandidatePoolSize: 10
-      }
-    });
-
-    // Add timeout for connection
-    const connectionTimer = setTimeout(() => {
-      if (!peer.connected) {
-        setStatus('connection_timeout');
-        peer.destroy();
-      }
-    }, 15000); // 15 seconds
-
-    peer.on('connect', () => {
-      clearTimeout(connectionTimer);
-    });
-
-    peer.on('signal', (signal) => {
-      if (socket && targetId) {
-        socket.emit('signal', { to: targetId, signal });
-      }
-    });
-
-    peer.on('connect', () => {
-      console.log('WebRTC connection established');
-      setStatus('connected');
-    });
-
-    peer.on('stream', (stream) => {
-      if (remoteVideoRef.current) {
-        remoteVideoRef.current.srcObject = stream;
-      }
-    });
-
-    peer.on('error', (err) => {
-      console.error('WebRTC error:', err);
-      setStatus('connection_error');
-    });
-
-    peer.on('close', () => {
-      console.log('WebRTC connection closed');
-      if (remoteVideoRef.current) {
-        remoteVideoRef.current.srcObject = null;
-      }
-    });
-
-    // Process any queued signals
-    while (signalQueue.current.length > 0) {
-      const signal = signalQueue.current.shift();
-      peer.signal(signal);
-    }
-
-    peerRef.current = peer;
-  };
 
   const handleNextPartner = () => {
     if (socket) {
@@ -225,18 +255,15 @@ const VideoChat = () => {
       setStatus('searching');
       setPartnerId(null);
       setRoomId(null);
-
+      
       if (peerRef.current) {
-        peerRef.current.destroy();
+        peerRef.current.close();
         peerRef.current = null;
       }
-
+      
       if (remoteVideoRef.current) {
         remoteVideoRef.current.srcObject = null;
       }
-
-      // Clear signal queue
-      signalQueue.current = [];
     }
   };
 
@@ -263,51 +290,49 @@ const VideoChat = () => {
 
   // Auto-reconnect on connection error
   useEffect(() => {
-    if (status === 'connection_error' && socket) {
+    if (status === 'connection_error' && socket && partnerId) {
       const timer = setTimeout(() => {
-        if (partnerId) {
-          initPeerConnection(partnerId);
-        }
+        initPeerConnection(partnerId, isInitiatorRef.current);
       }, 2000);
-
+      
       return () => clearTimeout(timer);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, partnerId, socket]);
 
   return (
     <div className="video-container">
       <div className="status-bar">{getStatusMessage()}</div>
-
+      
       <div className="video-grid">
         <div className="video-wrapper">
-          <video
-            ref={localVideoRef}
-            autoPlay
-            muted
-            playsInline
+          <video 
+            ref={localVideoRef} 
+            autoPlay 
+            muted 
+            playsInline 
             className={status === 'audio_only' ? 'audio-only' : ''}
           />
           <div className="video-label">You</div>
         </div>
-
+        
         <div className="video-wrapper">
           <video ref={remoteVideoRef} autoPlay playsInline />
           <div className="video-label">Partner</div>
         </div>
       </div>
-
+      
       <div className="controls">
-        <button
-          onClick={handleNextPartner}
+        <button 
+          onClick={handleNextPartner} 
           disabled={status !== 'connected' && status !== 'partner_left'}
           className="next-btn"
         >
           Next Partner
         </button>
-
+        
         {(status === 'media_error' || status === 'https_required') && (
-          <button
+          <button 
             onClick={handleRetryMedia}
             className="retry-btn"
           >
@@ -315,7 +340,7 @@ const VideoChat = () => {
           </button>
         )}
       </div>
-
+      
       {(status === 'media_error' || status === 'https_required') && (
         <div className="permission-help">
           <h3>Camera Access Required</h3>

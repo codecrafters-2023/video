@@ -33,9 +33,13 @@ io.on('connection', (socket) => {
 
     // Handle WebRTC signaling
     socket.on('signal', (data) => {
+        // Forward signal with type information
         io.to(data.to).emit('signal', {
             from: socket.id,
-            signal: data.signal
+            type: data.type,
+            offer: data.offer,
+            answer: data.answer,
+            candidate: data.candidate
         });
     });
 
@@ -101,12 +105,12 @@ function tryToPairUsers() {
         io.to(user1).emit('paired', {
             roomId,
             partnerId: user2,
-            isInitiator: true 
+            isInitiator: true
         });
         io.to(user2).emit('paired', {
             roomId,
             partnerId: user1,
-            isInitiator: false 
+            isInitiator: false
         });
     }
 }
