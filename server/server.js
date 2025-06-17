@@ -9,7 +9,7 @@ const server = http.createServer(app);
 
 // Configure CORS properly
 const allowedOrigins = process.env.ALLOWED_ORIGINS
-    ? ['https://videochats-app.vercel.app', 'http://localhost:3000'].split(',')
+    ? process.env.ALLOWED_ORIGINS.split(',')
     : ['https://videochats-app.vercel.app', 'http://localhost:3000'];
 
 const io = new Server(server, {
@@ -21,15 +21,27 @@ const io = new Server(server, {
 });
 
 // User and room management
-const waitingQueue = [];
+let waitingQueue = []; // Changed to let
 const activeRooms = new Map();
+
+// Cleanup disconnected users periodically
+setInterval(() => {
+    const initialCount = waitingQueue.length;
+    waitingQueue = waitingQueue.filter(id => io.sockets.sockets.has(id));
+    console.log(`Cleaned ${initialCount - waitingQueue.length} disconnected users from queue. Current size: ${waitingQueue.length}`);
+}, 30000); // Every 30 seconds
 
 io.on('connection', (socket) => {
     console.log(`New connection: ${socket.id}`);
 
     socket.on('join', (userId) => {
         console.log(`User ${userId} (${socket.id}) joined queue`);
-        waitingQueue.push(socket.id);
+
+        // Add to queue if not already present
+        if (!waitingQueue.includes(socket.id)) {
+            waitingQueue.push(socket.id);
+        }
+
         socket.emit('status', 'Searching for a partner...');
         tryToPairUsers();
     });
@@ -58,7 +70,9 @@ io.on('connection', (socket) => {
         cleanupUser(socket.id);
 
         // Rejoin queue
-        waitingQueue.push(socket.id);
+        if (!waitingQueue.includes(socket.id)) {
+            waitingQueue.push(socket.id);
+        }
         socket.emit('status', 'Searching for new partner...');
         tryToPairUsers();
     });
@@ -92,10 +106,16 @@ function cleanupUser(socketId) {
 function tryToPairUsers() {
     console.log(`Trying to pair users. Queue size: ${waitingQueue.length}`);
 
-    while (waitingQueue.length >= 2) {
-        const user1 = waitingQueue.shift();
-        const user2 = waitingQueue.shift();
+    // Filter out disconnected users
+    const activeUsers = waitingQueue.filter(id => io.sockets.sockets.has(id));
+
+    if (activeUsers.length >= 2) {
+        const user1 = activeUsers.shift();
+        const user2 = activeUsers.shift();
         const roomId = `room_${Date.now()}`;
+
+        // Update the actual waiting queue
+        waitingQueue = activeUsers;
 
         activeRooms.set(roomId, [user1, user2]);
 

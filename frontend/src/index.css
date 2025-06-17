@@ -375,3 +375,42 @@ video {
 .connection-indicator.error {
   background-color: #ef4444;
 }
+
+/* Add these styles to your existing CSS */
+.status-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.connection-status-indicator {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.connection-status-indicator.searching {
+  background-color: #FFC107;
+  animation: pulse 1.5s infinite;
+}
+
+.connection-status-indicator.connected {
+  background-color: #4CAF50;
+}
+
+.connection-status-indicator.error {
+  background-color: #F44336;
+  animation: pulse 1s infinite;
+}
+
+@keyframes pulse {
+  0% { opacity: 1; }
+  50% { opacity: 0.5; }
+  100% { opacity: 1; }
+}
+
+.next-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}

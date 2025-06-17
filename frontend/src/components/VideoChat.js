@@ -1,4 +1,3 @@
-/* eslint-disable react-hooks/exhaustive-deps */
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useSocket } from '../context/SocketContext';
 
@@ -15,6 +14,8 @@ const VideoChat = () => {
   const userId = useRef(Date.now().toString(36) + Math.random().toString(36).substring(2));
   const isInitiatorRef = useRef(false);
   const connectionTimeoutRef = useRef(null);
+  const retryCountRef = useRef(0);
+  const lastPartnerIdRef = useRef(null);
 
   // Initialize media with proper error handling
   const initMedia = useCallback(async () => {
@@ -82,19 +83,21 @@ const VideoChat = () => {
     }
     
     initMedia();
+    
+    return () => {
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach(track => track.stop());
+      }
+    };
   }, [initMedia]);
 
   // Cleanup
   useEffect(() => {
     return () => {
-      if (localStreamRef.current) {
-        localStreamRef.current.getTracks().forEach(track => track.stop());
-      }
       if (peerRef.current) {
         peerRef.current.close();
       }
       if (connectionTimeoutRef.current) {
-        // eslint-disable-next-line react-hooks/exhaustive-deps
         clearTimeout(connectionTimeoutRef.current);
       }
     };
@@ -102,6 +105,10 @@ const VideoChat = () => {
 
   // Initialize peer connection with native WebRTC
   const initPeerConnection = (targetId, isInitiator) => {
+    // Reset retry count for new connection
+    retryCountRef.current = 0;
+    lastPartnerIdRef.current = targetId;
+    
     if (peerRef.current) {
       peerRef.current.close();
     }
@@ -152,8 +159,18 @@ const VideoChat = () => {
         setStatus('connected');
       }
       else if (peer.iceConnectionState === 'failed' || 
-               peer.iceConnectionState === 'disconnected' ||
-               peer.iceConnectionState === 'closed') {
+               peer.iceConnectionState === 'disconnected') {
+        setStatus('connection_error');
+      }
+    };
+    
+    peer.onconnectionstatechange = () => {
+      console.log(`Connection state: ${peer.connectionState}`);
+      if (peer.connectionState === 'connected') {
+        setStatus('connected');
+      }
+      else if (peer.connectionState === 'disconnected' || 
+               peer.connectionState === 'failed') {
         setStatus('connection_error');
       }
     };
@@ -161,7 +178,10 @@ const VideoChat = () => {
     // For initiator: create offer
     if (isInitiator) {
       console.log('Creating offer as initiator');
-      peer.createOffer()
+      peer.createOffer({
+        offerToReceiveAudio: true,
+        offerToReceiveVideo: true
+      })
         .then(offer => {
           console.log('Offer created');
           return peer.setLocalDescription(offer);
@@ -173,6 +193,15 @@ const VideoChat = () => {
             type: 'offer', 
             offer: peer.localDescription 
           });
+          
+          // Set timeout for connection establishment
+          connectionTimeoutRef.current = setTimeout(() => {
+            if (peer.connectionState !== 'connected') {
+              console.log('Connection timed out');
+              setStatus('connection_timeout');
+              peer.close();
+            }
+          }, 15000); // 15 seconds timeout
         })
         .catch(err => {
           console.error('Error creating offer:', err);
@@ -206,6 +235,9 @@ const VideoChat = () => {
         peerRef.current.close();
         peerRef.current = null;
       }
+      if (connectionTimeoutRef.current) {
+        clearTimeout(connectionTimeoutRef.current);
+      }
     };
 
     const handleSignal = (data) => {
@@ -217,7 +249,10 @@ const VideoChat = () => {
           console.log('Processing offer');
           peerRef.current.setRemoteDescription(new RTCSessionDescription(data.offer))
             .then(() => {
-              return peerRef.current.createAnswer();
+              return peerRef.current.createAnswer({
+                offerToReceiveAudio: true,
+                offerToReceiveVideo: true
+              });
             })
             .then(answer => {
               return peerRef.current.setLocalDescription(answer);
@@ -229,6 +264,15 @@ const VideoChat = () => {
                 type: 'answer', 
                 answer: peerRef.current.localDescription 
               });
+              
+              // Set timeout for connection establishment
+              connectionTimeoutRef.current = setTimeout(() => {
+                if (peerRef.current.connectionState !== 'connected') {
+                  console.log('Connection timed out');
+                  setStatus('connection_timeout');
+                  peerRef.current.close();
+                }
+              }, 15000); // 15 seconds timeout
             })
             .catch(err => {
               console.error('Error handling offer:', err);
@@ -265,7 +309,9 @@ const VideoChat = () => {
     // Connection status
     socket.on('connect', () => {
       console.log('Socket connected');
-      setStatus('searching');
+      if (status === 'disconnected') {
+        setStatus('searching');
+      }
     });
     
     socket.on('disconnect', () => {
@@ -286,28 +332,39 @@ const VideoChat = () => {
       socket.off('disconnect');
       socket.off('connect_error');
     };
-  }, [socket]);
+  }, [socket, status]);
+
+  // Cleanup when leaving the component or changing partners
+  const fullCleanup = () => {
+    if (peerRef.current) {
+      peerRef.current.close();
+      peerRef.current = null;
+    }
+    
+    if (remoteVideoRef.current) {
+      remoteVideoRef.current.srcObject = null;
+    }
+    
+    if (connectionTimeoutRef.current) {
+      clearTimeout(connectionTimeoutRef.current);
+      connectionTimeoutRef.current = null;
+    }
+    
+    setPartnerId(null);
+    setRoomId(null);
+  };
 
   const handleNextPartner = () => {
     if (socket) {
       socket.emit('next');
       setStatus('searching');
-      setPartnerId(null);
-      setRoomId(null);
-      
-      if (peerRef.current) {
-        peerRef.current.close();
-        peerRef.current = null;
-      }
-      
-      if (remoteVideoRef.current) {
-        remoteVideoRef.current.srcObject = null;
-      }
+      fullCleanup();
     }
   };
 
   const handleRetryMedia = useCallback(async () => {
     setStatus('retrying');
+    fullCleanup();
     await initMedia();
   }, [initMedia]);
 
@@ -323,22 +380,36 @@ const VideoChat = () => {
       case 'retrying': return 'Retrying...';
       case 'requesting_media': return 'Requesting camera access...';
       case 'https_required': return '⚠️ Please use HTTPS for camera access';
+      case 'connection_timeout': return '⚠️ Connection timed out - Retrying';
       default: return status;
     }
   };
 
-  // Auto-reconnect on connection error
+  // Auto-reconnect on connection error with exponential backoff
   useEffect(() => {
-    if (status === 'connection_error' && socket && partnerId) {
-      const timer = setTimeout(() => {
-        console.log('Attempting to reconnect');
-        initPeerConnection(partnerId, isInitiatorRef.current);
-      }, 2000);
-      
-      return () => clearTimeout(timer);
+    if (status === 'connection_error' || status === 'connection_timeout') {
+      if (retryCountRef.current < 3 && lastPartnerIdRef.current) {
+        const delay = Math.pow(2, retryCountRef.current) * 1000;
+        console.log(`Reconnecting in ${delay}ms (attempt ${retryCountRef.current + 1})`);
+        
+        const timer = setTimeout(() => {
+          console.log('Attempting to reconnect');
+          initPeerConnection(lastPartnerIdRef.current, isInitiatorRef.current);
+          retryCountRef.current++;
+        }, delay);
+        
+        return () => clearTimeout(timer);
+      } else if (retryCountRef.current >= 3) {
+        // After 3 retries, reset and search for new partner
+        console.log('Max retries reached, searching for new partner');
+        handleNextPartner();
+        retryCountRef.current = 0;
+      }
+    } else if (status === 'connected') {
+      // Reset retry count on successful connection
+      retryCountRef.current = 0;
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status, partnerId, socket]);
+  }, [status]);
 
   return (
     <div className="video-container">
@@ -365,7 +436,7 @@ const VideoChat = () => {
       <div className="controls">
         <button 
           onClick={handleNextPartner} 
-          disabled={status !== 'connected' && status !== 'partner_left'}
+          disabled={status !== 'connected' && status !== 'partner_left' && status !== 'connection_error' && status !== 'connection_timeout'}
           className="next-btn"
         >
           Next Partner
