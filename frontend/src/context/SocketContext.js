@@ -8,9 +8,16 @@ export function useSocket() {
 }
 
 export const SocketProvider = ({ children }) => {
-  const socket = io('https://video-lb8z.onrender.com', {
+  // Use relative path in production, absolute in development
+  const socketUrl = process.env.NODE_ENV === 'production' 
+    ? window.location.origin 
+    : 'https://video-lb8z.onrender.com';
+  
+  const socket = io(socketUrl, {
     transports: ['websocket'],
-    reconnection: true
+    reconnection: true,
+    reconnectionAttempts: 5,
+    reconnectionDelay: 1000,
   });
 
   return (
@@ -19,3 +26,4 @@ export const SocketProvider = ({ children }) => {
     </SocketContext.Provider>
   );
 };
+// const socket = io('https://video-lb8z.onrender.com', {

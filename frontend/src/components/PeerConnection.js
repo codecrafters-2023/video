@@ -28,19 +28,23 @@ export default function usePeerConnection(localStream, remoteStreamRef, socket, 
 
     const callPartner = () => {
       const call = peer.call(partnerId, localStream);
-      call.on('stream', (remoteStream) => {
+      call.on('stream', remoteStream => {
         remoteStreamRef.current.srcObject = remoteStream;
+      });
+      call.on('error', err => {
+        console.error('Call error:', err);
       });
     };
 
     // Initiate call after 1s delay
     const timer = setTimeout(callPartner, 1000);
-    
+
     peerInstanceRef.current = peer;
     return () => {
       clearTimeout(timer);
       peer.destroy();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [socket, partnerId, localStream]);
 
   return peerRef;
