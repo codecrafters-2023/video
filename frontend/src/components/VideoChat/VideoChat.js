@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/exhaustive-deps */
 /* eslint-disable no-unused-vars */
 // /* eslint-disable no-unused-vars */
 // import React, { useState, useEffect, useRef, useCallback } from 'react';
@@ -558,6 +559,8 @@ const VideoChat = () => {
       localStreamRef.current = stream;
       if (localVideoRef.current) {
         localVideoRef.current.srcObject = stream;
+        // Ensure video plays
+        localVideoRef.current.play().catch(e => console.log("Video play error:", e));
       }
 
       setMediaError(null);
@@ -658,9 +661,22 @@ const VideoChat = () => {
 
     // Handle remote stream
     peer.ontrack = (event) => {
-      console.log('Received remote stream');
-      if (remoteVideoRef.current) {
-        remoteVideoRef.current.srcObject = event.streams[0];
+      console.log('Received remote stream', event.streams);
+      if (event.streams && event.streams.length > 0) {
+        // Use the first stream that has video tracks
+        const videoStream = event.streams.find(stream => 
+          stream.getVideoTracks().length > 0 || stream.getAudioTracks().length > 0
+        );
+        
+        if (videoStream && remoteVideoRef.current) {
+          console.log('Setting remote video source');
+          remoteVideoRef.current.srcObject = videoStream;
+          
+          // Ensure the video plays
+          remoteVideoRef.current.play().catch(e => 
+            console.error("Remote video play error:", e)
+          );
+        }
       }
     };
 
@@ -747,7 +763,7 @@ const VideoChat = () => {
       console.log(`Paired with partner: ${partnerId}, Initiator: ${isInitiator}`);
       setRoomId(roomId);
       setPartnerId(partnerId);
-      setStatus('connected');
+      setStatus('connecting');
       initPeerConnection(partnerId, isInitiator);
       setMessages([]); // Clear previous messages when connecting to a new partner
     };
@@ -767,6 +783,13 @@ const VideoChat = () => {
         clearTimeout(connectionTimeoutRef.current);
         connectionTimeoutRef.current = null;
       }
+      
+      // Add disconnect message to chat
+      setMessages(prev => [...prev, {
+        text: 'Partner has disconnected',
+        sender: 'system',
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      }]);
     };
 
     const handleSignal = (data) => {
@@ -812,6 +835,9 @@ const VideoChat = () => {
         case 'answer':
           console.log('Processing answer');
           peerRef.current.setRemoteDescription(new RTCSessionDescription(data.answer))
+            .then(() => {
+              console.log('Remote description set successfully');
+            })
             .catch(err => {
               console.error('Error setting answer:', err);
               setStatus('connection_error');
@@ -827,7 +853,7 @@ const VideoChat = () => {
           break;
 
         case 'chat':
-          console.log('Received chat message');
+          console.log('Received chat message:', data.message);
           setMessages(prev => [...prev, {
             text: data.message,
             sender: 'partner',
@@ -874,8 +900,7 @@ const VideoChat = () => {
       socket.off('disconnect');
       socket.off('connect_error');
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [socket, status]);
+  }, [socket]);
 
   // Cleanup function for partner change
   const fullCleanup = useCallback(() => {
@@ -917,8 +942,7 @@ const VideoChat = () => {
     } catch (err) {
       setStatus('media_error');
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initMedia]);
+  }, [initMedia, fullCleanup]);
 
   // Refresh the connection
   const handleRefresh = () => {
@@ -968,6 +992,7 @@ const VideoChat = () => {
     switch (status) {
       case 'disconnected': return 'Disconnected';
       case 'searching': return '🔍 Searching for partner...';
+      case 'connecting': return '🔄 Connecting to partner...';
       case 'connected': return '✅ Connected to partner';
       case 'partner_left': return '⚠️ Partner disconnected';
       case 'media_error': return `❌ Media error: ${mediaError || 'Permission denied'}`;
@@ -1005,11 +1030,10 @@ const VideoChat = () => {
       // Reset retry count on successful connection
       retryCountRef.current = 0;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status]);
 
   return (
-     <div className="vc-container">
+    <div className="vc-container">
       <div className="vc-status-bar">{getStatusMessage()}</div>
       
       <div className="vc-main-content">
@@ -1031,7 +1055,12 @@ const VideoChat = () => {
             
             <div className="vc-video-wrapper">
               <div className="vc-video-container">
-                <video ref={remoteVideoRef} autoPlay playsInline className="vc-remote-video" />
+                <video 
+                  ref={remoteVideoRef} 
+                  autoPlay 
+                  playsInline 
+                  className="vc-remote-video" 
+                />
                 <div className="vc-video-label">Partner</div>
                 <div className="vc-video-overlay"></div>
               </div>
@@ -1093,7 +1122,8 @@ const VideoChat = () => {
                 messages.map((msg, index) => (
                   <div 
                     key={index} 
-                    className={`vc-message ${msg.sender === 'me' ? 'vc-my-message' : 'vc-partner-message'}`}
+                    className={`vc-message ${msg.sender === 'me' ? 'vc-my-message' : 
+                                  msg.sender === 'partner' ? 'vc-partner-message' : 'vc-system-message'}`}
                   >
                     <div className="vc-message-content">
                       <div className="vc-message-text">{msg.text}</div>
