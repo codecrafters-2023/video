@@ -1009,115 +1009,120 @@ const VideoChat = () => {
   }, [status]);
 
   return (
-    <div className="vc-container">
+     <div className="vc-container">
       <div className="vc-status-bar">{getStatusMessage()}</div>
       
-      <div className="vc-grid">
-        <div className="vc-video-wrapper">
-          <div className="vc-video-container">
-            <video
-              ref={localVideoRef}
-              autoPlay
-              muted
-              playsInline
-              className={`vc-local-video ${status === 'audio_only' ? 'vc-audio-only' : ''}`}
-            />
-            <div className="vc-video-label">You</div>
-            <div className="vc-video-overlay"></div>
+      <div className="vc-main-content">
+        <div className="vc-video-section">
+          <div className="vc-video-grid">
+            <div className="vc-video-wrapper">
+              <div className="vc-video-container">
+                <video
+                  ref={localVideoRef}
+                  autoPlay
+                  muted
+                  playsInline
+                  className={`vc-local-video ${status === 'audio_only' ? 'vc-audio-only' : ''}`}
+                />
+                <div className="vc-video-label">You</div>
+                <div className="vc-video-overlay"></div>
+              </div>
+            </div>
+            
+            <div className="vc-video-wrapper">
+              <div className="vc-video-container">
+                <video ref={remoteVideoRef} autoPlay playsInline className="vc-remote-video" />
+                <div className="vc-video-label">Partner</div>
+                <div className="vc-video-overlay"></div>
+              </div>
+            </div>
           </div>
-        </div>
-        
-        <div className="vc-video-wrapper">
-          <div className="vc-video-container">
-            <video ref={remoteVideoRef} autoPlay playsInline className="vc-remote-video" />
-            <div className="vc-video-label">Partner</div>
-            <div className="vc-video-overlay"></div>
-          </div>
-        </div>
-      </div>
-      
-      {/* Chat Panel */}
-      <div className="vc-chat-panel">
-        <div className="vc-chat-header">
-          <h3>Chat</h3>
-          <div className="vc-chat-status">
-            {status === 'connected' ? (
-              <span className="vc-status-connected">● Connected</span>
-            ) : (
-              <span className="vc-status-disconnected">● Disconnected</span>
+          
+          <div className="vc-controls">
+            <button
+              onClick={handleNextPartner}
+              disabled={status !== 'connected' && status !== 'partner_left' && status !== 'connection_error' && status !== 'connection_timeout'}
+              className="vc-control-btn vc-next-btn"
+            >
+              <span className="vc-btn-icon">⟳</span>
+              <span className="vc-btn-text">Next Partner</span>
+            </button>
+            
+            {(status === 'disconnected' || status === 'partner_left' || status === 'connection_error') && (
+              <button
+                onClick={handleRefresh}
+                className="vc-control-btn vc-refresh-btn"
+              >
+                <span className="vc-btn-icon">↻</span>
+                <span className="vc-btn-text">Refresh</span>
+              </button>
+            )}
+            
+            {(status === 'media_error' || status === 'https_required') && (
+              <button
+                onClick={handleRetryMedia}
+                className="vc-control-btn vc-retry-btn"
+              >
+                <span className="vc-btn-icon">↻</span>
+                <span className="vc-btn-text">Retry Camera</span>
+              </button>
             )}
           </div>
         </div>
         
-        <div className="vc-messages-container">
-          {messages.length === 0 ? (
-            <div className="vc-no-messages">
-              <p>No messages yet</p>
-              <p>Say hello to your partner!</p>
-            </div>
-          ) : (
-            messages.map((msg, index) => (
-              <div 
-                key={index} 
-                className={`vc-message ${msg.sender === 'me' ? 'vc-my-message' : 'vc-partner-message'}`}
-              >
-                <div className="vc-message-content">
-                  <div className="vc-message-text">{msg.text}</div>
-                  <div className="vc-message-time">{msg.timestamp}</div>
-                </div>
+        <div className="vc-chat-section">
+          <div className="vc-chat-panel">
+            <div className="vc-chat-header">
+              <h3>Chat</h3>
+              <div className="vc-chat-status">
+                {status === 'connected' ? (
+                  <span className="vc-status-connected">● Connected</span>
+                ) : (
+                  <span className="vc-status-disconnected">● Disconnected</span>
+                )}
               </div>
-            ))
-          )}
-          <div ref={messagesEndRef} />
+            </div>
+            
+            <div className="vc-messages-container">
+              {messages.length === 0 ? (
+                <div className="vc-no-messages">
+                  <p>No messages yet</p>
+                  <p>Say hello to your partner!</p>
+                </div>
+              ) : (
+                messages.map((msg, index) => (
+                  <div 
+                    key={index} 
+                    className={`vc-message ${msg.sender === 'me' ? 'vc-my-message' : 'vc-partner-message'}`}
+                  >
+                    <div className="vc-message-content">
+                      <div className="vc-message-text">{msg.text}</div>
+                      <div className="vc-message-time">{msg.timestamp}</div>
+                    </div>
+                  </div>
+                ))
+              )}
+              <div ref={messagesEndRef} />
+            </div>
+            
+            <div className="vc-chat-input">
+              <textarea
+                value={newMessage}
+                onChange={(e) => setNewMessage(e.target.value)}
+                onKeyPress={handleKeyPress}
+                placeholder="Type a message..."
+                disabled={status !== 'connected'}
+              />
+              <button 
+                onClick={sendMessage} 
+                disabled={newMessage.trim() === '' || status !== 'connected'}
+                className="vc-send-btn"
+              >
+                Send
+              </button>
+            </div>
+          </div>
         </div>
-        
-        <div className="vc-chat-input">
-          <textarea
-            value={newMessage}
-            onChange={(e) => setNewMessage(e.target.value)}
-            onKeyPress={handleKeyPress}
-            placeholder="Type a message..."
-            disabled={status !== 'connected'}
-          />
-          <button 
-            onClick={sendMessage} 
-            disabled={newMessage.trim() === '' || status !== 'connected'}
-            className="vc-send-btn"
-          >
-            Send
-          </button>
-        </div>
-      </div>
-      
-      <div className="vc-controls">
-        <button
-          onClick={handleNextPartner}
-          disabled={status !== 'connected' && status !== 'partner_left' && status !== 'connection_error' && status !== 'connection_timeout'}
-          className="vc-control-btn vc-next-btn"
-        >
-          <span className="vc-btn-icon">⟳</span>
-          <span className="vc-btn-text">Next Partner</span>
-        </button>
-        
-        {(status === 'disconnected' || status === 'partner_left' || status === 'connection_error') && (
-          <button
-            onClick={handleRefresh}
-            className="vc-control-btn vc-refresh-btn"
-          >
-            <span className="vc-btn-icon">↻</span>
-            <span className="vc-btn-text">Refresh</span>
-          </button>
-        )}
-        
-        {(status === 'media_error' || status === 'https_required') && (
-          <button
-            onClick={handleRetryMedia}
-            className="vc-control-btn vc-retry-btn"
-          >
-            <span className="vc-btn-icon">↻</span>
-            <span className="vc-btn-text">Retry Camera</span>
-          </button>
-        )}
       </div>
       
       {(status === 'media_error' || status === 'https_required') && (
