@@ -26,6 +26,12 @@
     position: relative;
 }
 
+@media (max-width: 420px){
+    .vc-container {
+    height: 100%;
+}
+}
+
 /* Status Bar */
 .vc-status-bar {
     background-color: rgba(15, 23, 42, 0.8);
