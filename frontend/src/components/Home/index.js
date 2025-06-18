@@ -136,7 +136,7 @@ const HomePage = () => {
                     <div className="footer-links">
                         <Link href="#features">Features</Link>
                         <Link to={'/PrivacyPolicy'}>Privacy Policy</Link>
-                        <Link href="#">Terms of Service</Link>
+                        <Link to={'/terms'}>Terms of Service</Link>
                         <Link href="#">Contact</Link>
                     </div>
                     <div className="social-links">

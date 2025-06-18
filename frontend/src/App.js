@@ -5,17 +5,22 @@ import './index.css';
 import HomePage from './components/Home';
 import { Route, BrowserRouter, Routes } from 'react-router-dom';
 import PrivacyPolicy from './components/PrivacyPolicy/PrivacyPolicy';
+import TermsOfService from './components/TermaOfService/TermsOfServices';
+import { SocketProvider } from './context/SocketContext';
 
 function App() {
   return (
     <>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<HomePage />} />
-          <Route path="/chat" element={<VideoChat />} />
-          <Route path="/PrivacyPolicy" element={<PrivacyPolicy />} />
-        </Routes>
-      </BrowserRouter>
+      <SocketProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/" element={<HomePage />} />
+            <Route path="/chat" element={<VideoChat />} />
+            <Route path="/PrivacyPolicy" element={<PrivacyPolicy />} />
+            <Route path="/terms" element={<TermsOfService />} />
+          </Routes>
+        </BrowserRouter>
+      </SocketProvider>
     </>
     // <SocketProvider>
     //   <div className="app">
