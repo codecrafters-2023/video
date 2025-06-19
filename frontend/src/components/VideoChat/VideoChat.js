@@ -598,6 +598,16 @@ const VideoChat = () => {
     }
   }, [socket]);
 
+  useEffect(() => {
+    const heartbeat = setInterval(() => {
+      if (socket && status === 'connected') {
+        socket.emit('heartbeat');
+      }
+    }, 10000);
+
+    return () => clearInterval(heartbeat);
+  }, [socket, status]);
+
   // Initial media acquisition
   useEffect(() => {
     if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') {
@@ -664,16 +674,16 @@ const VideoChat = () => {
       console.log('Received remote stream', event.streams);
       if (event.streams && event.streams.length > 0) {
         // Use the first stream that has video tracks
-        const videoStream = event.streams.find(stream => 
+        const videoStream = event.streams.find(stream =>
           stream.getVideoTracks().length > 0 || stream.getAudioTracks().length > 0
         );
-        
+
         if (videoStream && remoteVideoRef.current) {
           console.log('Setting remote video source');
           remoteVideoRef.current.srcObject = videoStream;
-          
+
           // Ensure the video plays
-          remoteVideoRef.current.play().catch(e => 
+          remoteVideoRef.current.play().catch(e =>
             console.error("Remote video play error:", e)
           );
         }
@@ -783,7 +793,7 @@ const VideoChat = () => {
         clearTimeout(connectionTimeoutRef.current);
         connectionTimeoutRef.current = null;
       }
-      
+
       // Add disconnect message to chat
       setMessages(prev => [...prev, {
         text: 'Partner has disconnected',
@@ -956,22 +966,22 @@ const VideoChat = () => {
   // Send chat message
   const sendMessage = () => {
     if (newMessage.trim() === '' || !partnerId) return;
-    
+
     const messageData = {
       to: partnerId,
       type: 'chat',
       message: newMessage
     };
-    
+
     socket.emit('signal', messageData);
-    
+
     // Add to local messages
     setMessages(prev => [...prev, {
       text: newMessage,
       sender: 'me',
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     }]);
-    
+
     setNewMessage('');
   };
 
@@ -1009,33 +1019,23 @@ const VideoChat = () => {
   // Auto-reconnect on connection error with exponential backoff
   useEffect(() => {
     if (status === 'connection_error' || status === 'connection_timeout') {
-      if (retryCountRef.current < 3 && lastPartnerIdRef.current) {
+      if (retryCountRef.current < 3 && partnerId) { // ✅ Use current partnerId
         const delay = Math.pow(2, retryCountRef.current) * 1000;
-        console.log(`Reconnecting in ${delay}ms (attempt ${retryCountRef.current + 1})`);
-
         const timer = setTimeout(() => {
-          console.log('Attempting to reconnect');
-          initPeerConnection(lastPartnerIdRef.current, isInitiatorRef.current);
+          initPeerConnection(partnerId, isInitiatorRef.current);
           retryCountRef.current++;
         }, delay);
-
         return () => clearTimeout(timer);
-      } else if (retryCountRef.current >= 3) {
-        // After 3 retries, reset and search for new partner
-        console.log('Max retries reached, searching for new partner');
+      } else {
         handleNextPartner();
-        retryCountRef.current = 0;
       }
-    } else if (status === 'connected') {
-      // Reset retry count on successful connection
-      retryCountRef.current = 0;
     }
-  }, [status]);
+  }, [status, partnerId]);
 
   return (
     <div className="vc-container">
       <div className="vc-status-bar">{getStatusMessage()}</div>
-      
+
       <div className="vc-main-content">
         <div className="vc-video-section">
           <div className="vc-video-grid">
@@ -1052,21 +1052,21 @@ const VideoChat = () => {
                 <div className="vc-video-overlay"></div>
               </div>
             </div>
-            
+
             <div className="vc-video-wrapper">
               <div className="vc-video-container">
-                <video 
-                  ref={remoteVideoRef} 
-                  autoPlay 
-                  playsInline 
-                  className="vc-remote-video" 
+                <video
+                  ref={remoteVideoRef}
+                  autoPlay
+                  playsInline
+                  className="vc-remote-video"
                 />
                 <div className="vc-video-label">Partner</div>
                 <div className="vc-video-overlay"></div>
               </div>
             </div>
           </div>
-          
+
           <div className="vc-controls">
             <button
               onClick={handleNextPartner}
@@ -1076,7 +1076,7 @@ const VideoChat = () => {
               <span className="vc-btn-icon">⟳</span>
               <span className="vc-btn-text">Next Partner</span>
             </button>
-            
+
             {(status === 'disconnected' || status === 'partner_left' || status === 'connection_error') && (
               <button
                 onClick={handleRefresh}
@@ -1086,7 +1086,7 @@ const VideoChat = () => {
                 <span className="vc-btn-text">Refresh</span>
               </button>
             )}
-            
+
             {(status === 'media_error' || status === 'https_required') && (
               <button
                 onClick={handleRetryMedia}
@@ -1098,7 +1098,7 @@ const VideoChat = () => {
             )}
           </div>
         </div>
-        
+
         <div className="vc-chat-section">
           <div className="vc-chat-panel">
             <div className="vc-chat-header">
@@ -1111,7 +1111,7 @@ const VideoChat = () => {
                 )}
               </div>
             </div>
-            
+
             <div className="vc-messages-container">
               {messages.length === 0 ? (
                 <div className="vc-no-messages">
@@ -1120,10 +1120,10 @@ const VideoChat = () => {
                 </div>
               ) : (
                 messages.map((msg, index) => (
-                  <div 
-                    key={index} 
-                    className={`vc-message ${msg.sender === 'me' ? 'vc-my-message' : 
-                                  msg.sender === 'partner' ? 'vc-partner-message' : 'vc-system-message'}`}
+                  <div
+                    key={index}
+                    className={`vc-message ${msg.sender === 'me' ? 'vc-my-message' :
+                      msg.sender === 'partner' ? 'vc-partner-message' : 'vc-system-message'}`}
                   >
                     <div className="vc-message-content">
                       <div className="vc-message-text">{msg.text}</div>
@@ -1134,7 +1134,7 @@ const VideoChat = () => {
               )}
               <div ref={messagesEndRef} />
             </div>
-            
+
             <div className="vc-chat-input">
               <textarea
                 value={newMessage}
@@ -1143,8 +1143,8 @@ const VideoChat = () => {
                 placeholder="Type a message..."
                 disabled={status !== 'connected'}
               />
-              <button 
-                onClick={sendMessage} 
+              <button
+                onClick={sendMessage}
                 disabled={newMessage.trim() === '' || status !== 'connected'}
                 className="vc-send-btn"
               >
@@ -1154,7 +1154,7 @@ const VideoChat = () => {
           </div>
         </div>
       </div>
-      
+
       {(status === 'media_error' || status === 'https_required') && (
         <div className="vc-help-section">
           <h3 className="vc-help-title">Camera Access Required</h3>

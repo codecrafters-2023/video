@@ -34,18 +34,18 @@ setInterval(() => {
 
     // Check active rooms for disconnected users
     activeRooms.forEach((users, roomId) => {
-        const disconnectedUsers = users.filter(id => !io.sockets.sockets.has(id));
+        const connectedUsers = users.filter(id => io.sockets.sockets.has(id));
 
-        if (disconnectedUsers.length > 0) {
-            // Notify connected partner if only one disconnected
-            const connectedUsers = users.filter(id => io.sockets.sockets.has(id));
-            if (connectedUsers.length === 1) {
-                io.to(connectedUsers[0]).emit('partner_disconnected');
-            }
-
-            // Delete room and mappings
+        // If only one user remains, notify them
+        if (connectedUsers.length === 1) {
+            io.to(connectedUsers[0]).emit('partner_disconnected');
+            // Cleanup room mappings
             activeRooms.delete(roomId);
-            users.forEach(id => userRoomMap.delete(id));
+            connectedUsers.forEach(id => userRoomMap.delete(id));
+        }
+        // If no users remain, delete room
+        else if (connectedUsers.length === 0) {
+            activeRooms.delete(roomId);
         }
     });
 
@@ -95,7 +95,7 @@ io.on('connection', (socket) => {
         console.log(`Next requested by: ${socket.id}`);
         cleanupUser(socket.id, true); // Keep in queue
 
-        // Rejoin queue
+        // Rejoin queue if not already there
         if (!waitingQueue.includes(socket.id)) {
             waitingQueue.push(socket.id);
             tryToPairUsers();
@@ -122,24 +122,31 @@ io.on('connection', (socket) => {
 function cleanupUser(socketId, keepInQueue = false) {
     // Remove from waiting queue unless requested to keep
     if (!keepInQueue) {
-        const queueIndex = waitingQueue.indexOf(socketId);
-        if (queueIndex !== -1) {
-            waitingQueue.splice(queueIndex, 1);
-        }
+        waitingQueue = waitingQueue.filter(id => id !== socketId);
     }
 
     // Cleanup rooms
     const roomId = userRoomMap.get(socketId);
     if (roomId) {
         const users = activeRooms.get(roomId) || [];
-        const partnerId = users.find(id => id !== socketId);
+        const remainingUsers = users.filter(id => id !== socketId);
 
-        if (partnerId) {
-            io.to(partnerId).emit('partner_disconnected');
-            userRoomMap.delete(partnerId);
+        if (remainingUsers.length > 0) {
+            // Update room with remaining users
+            activeRooms.set(roomId, remainingUsers);
+
+            // Notify remaining partner
+            remainingUsers.forEach(userId => {
+                if (io.sockets.sockets.has(userId)) {
+                    io.to(userId).emit('partner_disconnected');
+                }
+            });
+        } else {
+            // Delete empty room
+            activeRooms.delete(roomId);
         }
 
-        activeRooms.delete(roomId);
+        // Remove user from mappings
         userRoomMap.delete(socketId);
     }
 }
@@ -147,15 +154,12 @@ function cleanupUser(socketId, keepInQueue = false) {
 // Pair users from the waiting queue atomically
 function tryToPairUsers() {
     // Filter out disconnected users
-    const activeUsers = waitingQueue.filter(id => io.sockets.sockets.has(id));
+    waitingQueue = waitingQueue.filter(id => io.sockets.sockets.has(id));
 
-    while (activeUsers.length >= 2) {
-        const user1 = activeUsers.shift();
-        const user2 = activeUsers.shift();
+    while (waitingQueue.length >= 2) {
+        const user1 = waitingQueue.shift();
+        const user2 = waitingQueue.shift();
         const roomId = `room_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`;
-
-        // Update actual waiting queue by removing paired users
-        waitingQueue = waitingQueue.filter(id => id !== user1 && id !== user2);
 
         // Create room mappings
         activeRooms.set(roomId, [user1, user2]);
